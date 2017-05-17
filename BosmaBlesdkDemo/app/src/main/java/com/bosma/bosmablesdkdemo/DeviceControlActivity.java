@@ -27,21 +27,34 @@ import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.os.Looper;
+import android.os.Message;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
+import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import com.bosma.blesdk.business.BleParseFactory;
+import com.bosma.blesdk.business.bean.CommonSetBean;
 import com.bosma.blesdk.business.bean.MeasureResp;
 import com.bosma.blesdk.business.bean.RequestData;
+import com.bosma.blesdk.business.bean.TempBean;
+import com.bosma.blesdk.business.bean.TherConnectBean;
+import com.bosma.blesdk.business.bean.TherHistoryBean;
+import com.bosma.blesdk.business.bean.TherRealTimeBean;
 import com.bosma.blesdk.business.interf.IParseBack;
 import com.bosma.blesdk.common.ParseStateCode;
 
+import java.lang.ref.WeakReference;
 import java.util.List;
 
+import static com.bosma.blesdk.business.BleParseFactory.getHandle;
+import static com.bosma.blesdk.business.BleParseFactory.getTherHandle;
 import static com.bosma.blesdk.common.ParseStateCode.BS_PARSE_MEASURE;
+import static com.bosma.bosmablesdkdemo.DeviceScanActivity.DN_BOSMA;
 
 /**
  * For a given BLE device, this Activity provides the user interface to connect, display data,
@@ -62,6 +75,8 @@ public class DeviceControlActivity extends Activity {
     private BluetoothLeService mBluetoothLeService;
     private boolean mConnected = false;
     private BluetoothGattCharacteristic mNotifyCharacteristic;
+
+    private CommHandler readBackHandler;
 
     // Code to manage Service lifecycle.
     private final ServiceConnection mServiceConnection = new ServiceConnection() {
@@ -107,10 +122,46 @@ public class DeviceControlActivity extends Activity {
             } else if (BluetoothLeService.ACTION_DATA_AVAILABLE.equals(action)) {
                 String data = intent.getStringExtra(BluetoothLeService.EXTRA_DATA);
                 displayData(data);
-                BleParseFactory.getHandle().parseFromBle(data);
+                if(DeviceScanActivity.DN_JUST_FIT.equals(mDeviceName)) {
+                    //TODO 单包的情况直接 丢入sdk
+                    getHandle().parseFromBle(data);
+                } else {
+                    //TODO 体温计存在接收多包数据的情况，需要将数据接收全后再丢入 SDK 处理
+                    BtReadManager.getIntence(readBackHandler).add(data);
+                }
             }
         }
     };
+
+
+
+    /**
+     * 蓝牙读取解析返回
+     */
+    public static class ReadBackHandler extends CommHandler {
+        private WeakReference<DeviceControlActivity> mService;
+
+        public ReadBackHandler(DeviceControlActivity service, Looper looper) {
+            super(looper);
+            this.mService = new WeakReference<DeviceControlActivity>(service);
+        }
+
+        @Override
+        public void handleMessage(Message msg) {
+            if(msg.obj == null) {
+                super.handleMessage(msg);
+                return;
+            }
+            String origin = (String) msg.obj;
+            getTherHandle().parseFromBle(origin);
+            super.handleMessage(msg);
+        }
+
+        @Override
+        public String getMessageName(Message message) {
+            return super.getMessageName(message);
+        }
+    }
 
 
     private void clearUI() {
@@ -129,6 +180,44 @@ public class DeviceControlActivity extends Activity {
         ((TextView) findViewById(R.id.device_address)).setText(mDeviceAddress);
         mConnectionState = (TextView) findViewById(R.id.connection_state);
         mDataField = (TextView) findViewById(R.id.data_value);
+        Button btnFatUnit = (Button) findViewById(R.id.btn_fatunit);
+
+        readBackHandler = new ReadBackHandler(this, getMainLooper());
+
+
+        btnFatUnit.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if(mDeviceName.startsWith(DN_BOSMA)) {
+                    //体温计数据测试（app端主动发起）
+
+                    //1、时间同步命令
+//                    String syncTime = BleParseFactory.getTherHandle().parseTimeSync();
+//                    Log.i(TAG,"时间同步命令：" + syncTime);
+//                    write(syncTime);
+
+
+//                    //2、防丢命令
+//                    String alert = BleParseFactory.getTherHandle().parseAlert(ParseStateCode.ALERT_OFF);
+//                    Log.i(TAG,"防丢命令：" + alert);
+//                    write(alert);
+
+//                    //3、设置历史温度保存频率命令
+                    String hisRate = BleParseFactory.getTherHandle().parseHisRate(60);
+                    Log.i(TAG,"历史数据保存频率命令：" + hisRate);
+                    write(hisRate);
+
+
+                    return;
+                } else {
+
+                    //体脂秤数据测试（app端主动发起）
+                    String fatUnitString = BleParseFactory.getHandle().parseFatAndUnit(ParseStateCode.FAT_ON,ParseStateCode.UNIT_HALF_KG);
+                    write(fatUnitString);
+                }
+
+            }
+        });
 
         getActionBar().setTitle(mDeviceName);
         getActionBar().setDisplayHomeAsUpEnabled(true);
@@ -138,19 +227,23 @@ public class DeviceControlActivity extends Activity {
 
         //初始化测量数据
         RequestData data = new RequestData();
-        data.setUserid("your app userid");
-        data.setHeight("175");
-        data.setAge("27");
-        data.setGender("0");
-        data.setMac(mDeviceAddress);
+        data.setUserid("your app userid");//用户id，后台用来区分哪个用户测量
+        data.setHeight("175");//身高cm
+        data.setAge("27");//年龄
+        data.setGender("4");//性别：0：男   1：女  4:儿童男  5：儿童女  6：孕妇
+        data.setMac(mDeviceAddress);//设备mac地址
 
 
         displayData("");
-        BleParseFactory.getHandle()
+
+
+
+        //************体脂秤
+        getHandle()
                 .init(ParseStateCode.FAT_ON, ParseStateCode.UNIT_KG)
                 .initData(this,data);
 
-        BleParseFactory.getHandle().initIParseBack(new IParseBack() {
+        getHandle().initIParseBack(new IParseBack() {
             @Override
             public void parseResp(int code, Object data) {
                 switch (code) {
@@ -170,7 +263,7 @@ public class DeviceControlActivity extends Activity {
                         displayData("to ble:"+ (String) data);
                         write((String) data);
                         break;
-                    case ParseStateCode.BS_PARSE_FATUNIT://测脂单位设置
+                    case ParseStateCode.BS_PARSE_FATUNIT://测脂单位设置返回
                         String result = (String)data;
                         if("00".equals(result)) {
                             Toast.makeText(DeviceControlActivity.this,"测脂或单位设置成功",Toast.LENGTH_SHORT).show();
@@ -194,6 +287,64 @@ public class DeviceControlActivity extends Activity {
                 }
             }
         });
+
+
+        //***************体温计
+        getTherHandle().initIParseBack(new IParseBack() {
+            @Override
+            public void parseResp(int code, Object data) {
+                switch (code) {
+                    case ParseStateCode.BS_ERROR_CHECK://数据错误
+                        displayData("error:" + (String) data);
+                        break;
+                    case ParseStateCode.BS_PARSE_CONNECT://连接命令返回
+                        TherConnectBean therConnectBean = (TherConnectBean) data;
+                        displayData("to ble:" + therConnectBean.getParse());
+                        Log.i(DeviceControlActivity.class.getSimpleName(), therConnectBean.toString());
+                        write(therConnectBean.getParse());
+                        break;
+
+                    case ParseStateCode.BS_TH_PARSE_RTEMP: //实时温度
+                        TherRealTimeBean therRealTimeBean = (TherRealTimeBean) data;
+                        displayData("to ble:" + therRealTimeBean.getParse());
+                        Log.i(DeviceControlActivity.class.getSimpleName(), therRealTimeBean.getTempObj().getTemp() +"  " + therRealTimeBean.getTempObj().getTime());
+                        write(therRealTimeBean.getParse());
+                        break;
+
+                    case ParseStateCode.BS_TH_PARSE_HTEMP:  //历史温度
+                        TherHistoryBean therHistoryBean = (TherHistoryBean) data;
+                        displayData("to ble:" + therHistoryBean.getParse());
+
+                        List<TempBean> tempBeanList = therHistoryBean.getTempList();
+                        for(int i = 0; i < tempBeanList.size(); i++) {
+                            Log.i(DeviceControlActivity.class.getSimpleName(), tempBeanList.get(i).getTemp() + "  " + tempBeanList.get(i).getTime());
+                        }
+
+                        write(therHistoryBean.getParse());
+
+                        break;
+
+                    case ParseStateCode.BS_TH_PARSE_COMMON_SET://时间同步命令、防丢命令、历史数据保存频率命令 解析返回都进入这里
+
+                        CommonSetBean commonSetBean = (CommonSetBean) data;
+                        if(commonSetBean.isOk()) {
+                            Toast.makeText(DeviceControlActivity.this, "设置成功", Toast.LENGTH_SHORT).show();
+                        } else {
+                            Toast.makeText(DeviceControlActivity.this, "设置成功", Toast.LENGTH_SHORT).show();
+                        }
+
+                        break;
+
+
+                    default:
+                        break;
+                }
+
+            }
+        });
+
+
+
     }
 
     private void write(String data) {

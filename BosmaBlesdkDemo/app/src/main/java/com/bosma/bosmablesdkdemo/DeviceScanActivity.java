@@ -27,6 +27,7 @@ import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -43,6 +44,10 @@ import java.util.ArrayList;
  * Activity for scanning and displaying available Bluetooth LE devices.
  */
 public class DeviceScanActivity extends ListActivity {
+
+    public static final String DN_BOSMA = "Bosma";
+    public static final String DN_JUST_FIT = "JustFit";
+
     private LeDeviceListAdapter mLeDeviceListAdapter;
     private BluetoothAdapter mBluetoothAdapter;
     private boolean mScanning;
@@ -257,11 +262,16 @@ public class DeviceScanActivity extends ListActivity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            Log.i(DeviceScanActivity.class.getSimpleName(), device.getName() +"--" +device.getAddress());
                             if(TextUtils.isEmpty(device.getName())) {
                                 return;
                             }
-                            mLeDeviceListAdapter.addDevice(device);
-                            mLeDeviceListAdapter.notifyDataSetChanged();
+
+                            if(device.getName().startsWith(DN_BOSMA) || device.getName().startsWith(DN_JUST_FIT)) {
+                                mLeDeviceListAdapter.addDevice(device);
+                                mLeDeviceListAdapter.notifyDataSetChanged();
+                            }
+
                         }
                     });
                 }
